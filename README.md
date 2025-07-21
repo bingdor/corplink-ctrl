@@ -12,11 +12,11 @@ sudo corplink-ctrl stop
 #查看状态命令
 sudo corplink-ctrl status
 
-#关闭开机自启动
+## 关闭开机自启动
 #创建备份
 sudo cp /Library/LaunchDaemons/com.volcengine.corplink.service.plist /Library/LaunchDaemons/com.volcengine.corplink.service.plist.bak
 
-# 使用默认编辑器打开配置文件
+#使用默认编辑器打开配置文件
 sudo nano /Library/LaunchDaemons/com.volcengine.corplink.service.plist
 
 #在文件中找到以下两行并修改为 false：
