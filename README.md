@@ -30,7 +30,7 @@ sudo cp /Library/LaunchDaemons/com.volcengine.corplink.service.plist /Library/La
 ```
 ##### 使用默认编辑器打开配置文件
 ```bash
-sudo nano /Library/LaunchDaemons/com.volcengine.corplink.service.plist
+sudo vim /Library/LaunchDaemons/com.volcengine.corplink.service.plist
 ```
 
 ##### 在文件中找到以下两行并修改为 false,保存文件后重启即可
