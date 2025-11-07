@@ -1,5 +1,5 @@
 # Mac OS 使用方法：
-1. 使用touch命令创建文件corplink-ctrl
+1. 下载macos目录下的corplink-ctrl文件，或使用下面命令手动创建并复制上代码内容
 ```bash
 touch corplink-ctrl
 ```
