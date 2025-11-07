@@ -1,0 +1,249 @@
+#!/bin/bash
+
+# 服务控制脚本：corplink-ctrl
+# 功能：启动/停止 corplink-service 并验证结果
+
+# 服务配置
+SERVICE_LABEL="com.volcengine.corplink.service"
+PLIST_PATH="/Library/LaunchDaemons/com.volcengine.corplink.service.plist"
+EXECUTABLE="/usr/local/corplink/corplink-service"
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
+
+# 检查命令执行状态
+check_status() {
+    local action=$1
+    local expected_status=$2
+    
+    # 等待服务状态更新
+    sleep 1
+    
+    # 通过 ps 命令检查服务进程是否存在
+    if ps aux | grep -v grep | grep -q "$EXECUTABLE"; then
+        local is_running=true
+        local pid=$(ps aux | grep -v grep | grep "$EXECUTABLE" | awk '{print $2}')
+    else
+        local is_running=false
+        local pid=""
+    fi
+    
+    # 通过 launchctl 检查服务加载状态
+    if launchctl list | grep -q "$SERVICE_LABEL"; then
+        local is_loaded=true
+    else
+        local is_loaded=false
+    fi
+    
+    # 根据操作类型验证结果
+    if [[ "$expected_status" == "running" && "$is_running" == true ]]; then
+        echo -e "${GREEN}[✓] $action 成功：服务正在运行 (PID: $pid)${NC}"
+        return 0
+    elif [[ "$expected_status" == "stopped" && "$is_running" == false && "$is_loaded" == false ]]; then
+        echo -e "${GREEN}[✓] $action 成功：服务已停止且未加载${NC}"
+        return 0
+    else
+        echo -e "${RED}[✗] $action 失败${NC}"
+        
+        if [[ "$expected_status" == "running" ]]; then
+            echo -e "${YELLOW}[!] 服务未运行${NC}"
+        else
+            echo -e "${YELLOW}[!] 服务仍在运行或未卸载${NC}"
+            [[ -n "$pid" ]] && echo -e "${YELLOW}[!] 进程 PID: $pid${NC}"
+        fi
+        
+        # 输出详细状态信息
+        echo -e "${YELLOW}[*] 服务状态详情：${NC}"
+        echo -n "  - 进程状态："
+        if [[ "$is_running" == true ]]; then
+            echo -e "${GREEN}运行中 (PID: $pid)${NC}"
+        else
+            echo -e "${RED}已停止${NC}"
+        fi
+        
+        echo -n "  - 加载状态："
+        if [[ "$is_loaded" == true ]]; then
+            echo -e "${GREEN}已加载${NC}"
+        else
+            echo -e "${RED}未加载${NC}"
+        fi
+        
+        return 1
+    fi
+}
+
+# 启动服务
+start_service() {
+    echo -e "${YELLOW}[*] 正在启动 corplink 服务...${NC}"
+    
+    # 加载并启动服务
+    sudo launchctl load "$PLIST_PATH"
+    if ! sudo launchctl start "$SERVICE_LABEL"; then
+        echo -e "${RED}[✗] 启动命令执行失败${NC}"
+        return 1
+    fi
+    
+    # 检查启动状态
+    check_status "启动" "running"
+}
+
+# 停止服务（增强版）
+stop_service() {
+    echo -e "${YELLOW}[*] 正在停止 corplink 服务...${NC}"
+    
+    # 尝试正常停止服务
+    if ! sudo launchctl stop "$SERVICE_LABEL"; then
+        echo -e "${YELLOW}[!] 正常停止失败，尝试强制终止...${NC}"
+    fi
+    
+    # 卸载服务配置
+    if ! sudo launchctl unload "$PLIST_PATH"; then
+        echo -e "${YELLOW}[!] 卸载服务配置失败，检查文件权限...${NC}"
+        if [[ -f "$PLIST_PATH" && ! -w "$PLIST_PATH" ]]; then
+            echo -e "${YELLOW}[!] 配置文件 $PLIST_PATH 不可写${NC}"
+        fi
+    fi
+    
+    # 查找并强制终止所有相关进程（增强版）
+    local pids=$(ps aux | grep -v grep | grep "$EXECUTABLE" | awk '{print $2}')
+    if [[ -n "$pids" ]]; then
+        echo -e "${YELLOW}[*] 发现残留进程，正在强制终止...${NC}"
+        echo "$pids" | xargs -I {} sudo kill -9 {} 2>/dev/null
+        sleep 1
+        
+        # 再次检查是否还有残留进程
+        local remaining_pids=$(ps aux | grep -v grep | grep "$EXECUTABLE" | awk '{print $2}')
+        if [[ -n "$remaining_pids" ]]; then
+            echo -e "${RED}[✗] 强制终止失败，仍有残留进程 (PID: $remaining_pids)${NC}"
+            echo -e "${YELLOW}[!] 尝试使用 root shell 手动终止：${NC}"
+            echo -e "${YELLOW}  sudo su -c 'ps aux | grep $EXECUTABLE | grep -v grep | awk '\''{print \$2}'\'' | xargs kill -9'${NC}"
+            return 1
+        else
+            echo -e "${GREEN}[✓] 残留进程已终止${NC}"
+        fi
+    fi
+    
+    # 检查是否有保护属性
+    if [[ -f "$PLIST_PATH" ]]; then
+        local flags=$(ls -lO "$PLIST_PATH" | awk '{print $5}')
+        if [[ "$flags" == *"uchg"* || "$flags" == *"schg"* ]]; then
+            echo -e "${RED}[✗] 配置文件 $PLIST_PATH 被设置了不可变属性 ($flags)${NC}"
+            echo -e "${YELLOW}[!] 需先移除属性：${NC}"
+            echo -e "${YELLOW}  sudo chflags nouchg $PLIST_PATH${NC}"
+            return 1
+        fi
+    fi
+    
+    # 检查停止状态
+    check_status "停止" "stopped"
+}
+
+# 查看服务状态
+check_current_status() {
+    echo -e "${YELLOW}[*] 正在检查 corplink 服务状态...${NC}"
+    
+    # 通过 ps 命令检查服务进程是否存在
+    if ps aux | grep -v grep | grep -q "$EXECUTABLE"; then
+        local is_running=true
+        local pid=$(ps aux | grep -v grep | grep "$EXECUTABLE" | awk '{print $2}')
+    else
+        local is_running=false
+        local pid=""
+    fi
+    
+    # 通过 launchctl 检查服务加载状态
+    if launchctl list | grep -q "$SERVICE_LABEL"; then
+        local is_loaded=true
+        local load_status=$(launchctl list | grep "$SERVICE_LABEL" | awk '{print $3}')
+    else
+        local is_loaded=false
+        local load_status=""
+    fi
+    
+    # 检查配置文件是否存在
+    if [[ -f "$PLIST_PATH" ]]; then
+        local plist_exists=true
+        local plist_perm=$(ls -l "$PLIST_PATH" | awk '{print $1}')
+    else
+        local plist_exists=false
+    fi
+    
+    # 输出状态信息
+    echo -e "${YELLOW}[*] corplink 服务状态详情：${NC}"
+    
+    echo -n "  - 进程状态："
+    if [[ "$is_running" == true ]]; then
+        echo -e "${GREEN}运行中 (PID: $pid)${NC}"
+    else
+        echo -e "${RED}已停止${NC}"
+    fi
+    
+    echo -n "  - 加载状态："
+    if [[ "$is_loaded" == true ]]; then
+        echo -e "${GREEN}已加载 (状态码: $load_status)${NC}"
+    else
+        echo -e "${RED}未加载${NC}"
+    fi
+    
+    echo -n "  - 配置文件："
+    if [[ "$plist_exists" == true ]]; then
+        echo -e "${GREEN}存在 ($PLIST_PATH)${NC}"
+        echo -e "    权限: ${YELLOW}$plist_perm${NC}"
+        
+        # 检查文件特殊属性
+        local flags=$(ls -lO "$PLIST_PATH" | awk '{print $5}')
+        if [[ "$flags" == *"uchg"* || "$flags" == *"schg"* ]]; then
+            echo -e "    特殊属性: ${RED}$flags${NC}"
+        else
+            echo -e "    特殊属性: ${GREEN}无${NC}"
+        fi
+    else
+        echo -e "${RED}不存在${NC}"
+    fi
+    
+    # 检查服务目录权限
+    if [[ -d "/usr/local/corplink" ]]; then
+        local dir_perm=$(ls -ld "/usr/local/corplink" | awk '{print $1}')
+        echo -e "  - 服务目录权限: ${YELLOW}$dir_perm /usr/local/corplink${NC}"
+    fi
+    
+    # 返回状态码
+    if [[ "$is_running" == true && "$is_loaded" == true ]]; then
+        return 0  # 服务正常运行
+    elif [[ "$is_running" == false && "$is_loaded" == false ]]; then
+        return 3  # 服务完全停止
+    else
+        return 1  # 服务状态异常
+    fi
+}
+
+# 显示使用帮助
+show_help() {
+    echo "用法: $0 [start|stop|status]"
+    echo "  start   - 启动 corplink 服务"
+    echo "  stop    - 停止 corplink 服务"
+    echo "  status  - 查看服务当前状态"
+    exit 1
+}
+
+# 主逻辑
+case "$1" in
+    start)
+        start_service
+        ;;
+    stop)
+        stop_service
+        ;;
+    status)
+        check_current_status
+        exit $?
+        ;;
+    *)
+        show_help
+        ;;
+esac
+
+exit $?
