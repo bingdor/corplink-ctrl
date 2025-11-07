@@ -32,7 +32,12 @@ sudo cp /Library/LaunchDaemons/com.volcengine.corplink.service.plist /Library/La
 ```bash
 sudo vim /Library/LaunchDaemons/com.volcengine.corplink.service.plist
 ```
-##### 在文件中找到以下两行并将<true/>修改为 false,保存文件后重启即可
+##### 在文件中找到以下两行
+```xml
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+```
+##### 将<true/>修改为 false,保存文件后重启即可
 ```xml
 <key>RunAtLoad</key><false/>
 <key>KeepAlive</key><false/>
